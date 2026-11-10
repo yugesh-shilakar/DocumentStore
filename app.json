@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "PDF Vault",
+    "slug": "pdf-vault",
+    "scheme": ["pdfvault", "com.pdfvault.app"],
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pdfvault.app"
+    },
+    "android": {
+      "package": "com.pdfvault.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-image",
+      "expo-web-browser",
+      "expo-secure-store",
+      "expo-sharing",
+      "react-native-blob-util",
+      "expo-document-picker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow PDF Vault to import photos that you choose to back up.",
+          "cameraPermission": "Allow PDF Vault to capture photos that you choose to back up."
+        }
+      ]
+    ]
+  }
+}
