@@ -1,6 +1,6 @@
-import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
+import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { DB_NAME } from '../config';
+import { getActiveDatabase } from './accountDb';
 import type { RemoteFile, SyncState, VaultFile } from '../types';
 
 interface FileRow {
@@ -19,49 +19,8 @@ interface FileRow {
   deleted: number;
 }
 
-const SCHEMA = `
-PRAGMA journal_mode = WAL;
-CREATE TABLE IF NOT EXISTS files (
-  id TEXT PRIMARY KEY NOT NULL,
-  name TEXT NOT NULL,
-  mime_type TEXT NOT NULL,
-  size INTEGER NOT NULL DEFAULT 0,
-  sha256 TEXT NOT NULL DEFAULT '',
-  local_path TEXT,
-  drive_file_id TEXT,
-  sync_state TEXT NOT NULL DEFAULT 'local_only',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  last_synced_at INTEGER,
-  retry_count INTEGER NOT NULL DEFAULT 0,
-  deleted INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_files_sync_state ON files(sync_state);
-CREATE INDEX IF NOT EXISTS idx_files_drive_file_id ON files(drive_file_id);
-CREATE TABLE IF NOT EXISTS settings (
-  key TEXT PRIMARY KEY NOT NULL,
-  value TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sync_queue (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  file_id TEXT NOT NULL,
-  operation TEXT NOT NULL,
-  attempts INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT,
-  created_at INTEGER NOT NULL
-);
-`;
-
-let dbPromise: Promise<SQLiteDatabase> | null = null;
-
 export function getDatabase(): Promise<SQLiteDatabase> {
-  if (!dbPromise) {
-    dbPromise = openDatabaseAsync(DB_NAME).then(async (db) => {
-      await db.execAsync(SCHEMA);
-      return db;
-    });
-  }
-  return dbPromise;
+  return getActiveDatabase();
 }
 
 function mapRow(row: FileRow): VaultFile {
@@ -193,6 +152,15 @@ export async function upsertRemoteFile(
   const existing = await getFile(vaultId);
   const now = Date.now();
   if (existing) {
+    const unchanged =
+      existing.name === remote.name &&
+      existing.mimeType === remote.mimeType &&
+      existing.size === remote.size &&
+      existing.driveFileId === remote.id &&
+      existing.sha256 === sha256;
+    if (unchanged) {
+      return;
+    }
     const db = await getDatabase();
     await db.runAsync(
       `UPDATE files SET name = ?, mime_type = ?, size = ?, drive_file_id = ?, sha256 = ?,

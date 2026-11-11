@@ -70,7 +70,11 @@ export async function markDeletedInManifest(folderId: string, file: VaultFile): 
   );
 }
 
-export async function saveManifest(folderId: string, files: VaultFile[]): Promise<void> {
+export async function saveManifest(
+  folderId: string,
+  files: VaultFile[],
+  tombstoneFiles: VaultFile[] = [],
+): Promise<void> {
   const existing = await loadManifest(folderId);
   const entries = new Map<string, StoredManifestFile>();
 
@@ -79,6 +83,9 @@ export async function saveManifest(folderId: string, files: VaultFile[]): Promis
   }
   for (const file of files) {
     entries.set(file.id, manifestEntryFromFile(file));
+  }
+  for (const file of tombstoneFiles) {
+    entries.set(file.id, { ...manifestEntryFromFile(file), deleted: true });
   }
 
   const manifest: VaultManifest = {

@@ -7,6 +7,7 @@ import {
   Alert,
   AppState,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   RefreshControl,
@@ -16,6 +17,7 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type ScrollViewInstance,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -153,6 +155,8 @@ export function VaultScreen({ navigation }: Props) {
 
   const previousConnected = useRef<boolean | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detailScrollRef = useRef<ScrollViewInstance>(null);
+  const nameFieldY = useRef(0);
   const [tab, setTab] = useState<TabKey>('stacks');
   const [filter, setFilter] = useState<FilterKey | null>(null);
   const [search, setSearch] = useState('');
@@ -602,7 +606,7 @@ export function VaultScreen({ navigation }: Props) {
         animationType="slide"
         onRequestClose={() => setDetailId(null)}
       >
-        <View style={styles.sheetBackdrop}>
+        <KeyboardAvoidingView behavior="padding" style={styles.sheetBackdrop}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Close"
@@ -628,9 +632,11 @@ export function VaultScreen({ navigation }: Props) {
               </View>
 
               <ScrollView
+                ref={detailScrollRef}
                 style={styles.detailScroll}
                 contentContainerStyle={styles.detailContent}
                 showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
               >
                 <View style={styles.previewCard}>
                   <FilePreview file={detailFile} style={styles.detailPreview} fit="contain" />
@@ -659,11 +665,22 @@ export function VaultScreen({ navigation }: Props) {
                   />
                 </View>
 
-                <View style={styles.fieldGroup}>
+                <View
+                  style={styles.fieldGroup}
+                  onLayout={(event) => {
+                    nameFieldY.current = event.nativeEvent.layout.y;
+                  }}
+                >
                   <Text style={styles.fieldLabel}>File name</Text>
                   <TextInput
                     value={draftName}
                     onChangeText={setDraftName}
+                    onFocus={() => {
+                      detailScrollRef.current?.scrollTo({
+                        y: Math.max(0, nameFieldY.current - spacing.md),
+                        animated: true,
+                      });
+                    }}
                     placeholder="File name"
                     placeholderTextColor={colors.muted}
                     style={styles.input}
@@ -708,7 +725,7 @@ export function VaultScreen({ navigation }: Props) {
               </View>
             </View>
           ) : null}
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

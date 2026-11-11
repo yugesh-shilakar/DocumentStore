@@ -8,6 +8,16 @@ import {
   type PickedAssets,
 } from '../features/importAssets';
 import * as auth from '../services/auth';
+import {
+  LOCAL_ACCOUNT_KEY,
+  accountKeyFor,
+  adoptLocalVaultInto,
+  getActiveAccountKey,
+  getMetaSetting,
+  initializeAccountStorage,
+  setActiveAccount,
+  setMetaSetting,
+} from '../services/accountDb';
 import { getStorageUsageBytes, importAsset } from '../services/localFileStore';
 import * as metadataDb from '../services/metadataDb';
 import {
@@ -155,12 +165,12 @@ export const useVaultStore = create<VaultState>((set, get) => {
       }
       initialized = true;
       try {
-        await metadataDb.getDatabase();
-        const [session, autoSyncSetting, themeSetting, starredSetting] = await Promise.all([
-          auth.restoreSession(),
+        const session = await auth.restoreSession();
+        await initializeAccountStorage(session?.user.id ?? null);
+        const [autoSyncSetting, starredSetting, themeSetting] = await Promise.all([
           metadataDb.getSetting('auto_sync'),
-          metadataDb.getSetting('theme_mode'),
           metadataDb.getSetting('starred_ids'),
+          getMetaSetting('theme_mode'),
         ]);
         const files = await metadataDb.listFiles();
         set({
@@ -186,27 +196,14 @@ export const useVaultStore = create<VaultState>((set, get) => {
       set({ error: null });
       try {
         const session = await auth.signInWithGoogle();
-        const previousUser = await metadataDb.getSetting('last_user_id');
-        if (previousUser && previousUser !== session.user.id) {
-          await metadataDb.setSetting('drive_folder_id', '');
-          const files = await metadataDb.listFiles();
-          for (const file of files) {
-            if (!file.localPath) {
-              await metadataDb.deleteFileRow(file.id);
-              continue;
-            }
-            await metadataDb.upsertFile({
-              ...file,
-              driveFileId: null,
-              syncState: 'local_only',
-              lastSyncedAt: null,
-              retryCount: 0,
-              deleted: false,
-            });
-          }
+        const accountKey = accountKeyFor(session.user.id);
+        if (getActiveAccountKey() === LOCAL_ACCOUNT_KEY) {
+          await adoptLocalVaultInto(accountKey);
         }
-        await metadataDb.setSetting('last_user_id', session.user.id);
+        await setMetaSetting('last_user_id', session.user.id);
+        await setActiveAccount(accountKey);
         set({ session });
+        await get().loadFiles();
         await get().refresh();
       } catch (error) {
         set({ error: toUserMessage(error) });
@@ -356,7 +353,7 @@ export const useVaultStore = create<VaultState>((set, get) => {
     setThemeMode: async (mode: ThemeMode) => {
       set({ themeMode: mode });
       try {
-        await metadataDb.setSetting('theme_mode', mode);
+        await setMetaSetting('theme_mode', mode);
       } catch {
         // The theme still applies for this session if persistence fails.
       }

@@ -11,6 +11,7 @@ import {
   driveDownloadUrl,
   ensureVaultFolder,
   getAuthHeaders,
+  getDriveFileMetadata,
   listVaultFiles,
   renameDriveFile,
   uploadVaultFile,
@@ -213,18 +214,26 @@ export async function refreshRemoteMetadata(
 
   const remoteIds = new Set(remotes.map((remote) => remote.id));
   const files = await metadataDb.listFiles();
+  const removedRemotely: VaultFile[] = [];
   for (const file of files) {
-    if (
-      file.syncState === 'synced' &&
-      file.driveFileId &&
-      !remoteIds.has(file.driveFileId) &&
-      localFileExists(file.localPath)
-    ) {
-      await metadataDb.setSyncState(file.id, 'pending_upload');
+    if (!file.driveFileId || remoteIds.has(file.driveFileId)) {
+      continue;
+    }
+    let remoteInfo: { trashed: boolean } | null;
+    try {
+      remoteInfo = await getDriveFileMetadata(file.driveFileId);
+    } catch {
+      logger.warn('Could not verify a cloud file; it will be checked again on the next sync.');
+      continue;
+    }
+    if (!remoteInfo || remoteInfo.trashed) {
+      deleteLocalFile(file.localPath);
+      await metadataDb.deleteFileRow(file.id);
+      removedRemotely.push(file);
     }
   }
 
-  await saveManifest(folderId, files);
+  await saveManifest(folderId, await metadataDb.listFiles(), removedRemotely);
   return { remoteCount: remotes.length, pendingDownload };
 }
 
@@ -262,8 +271,8 @@ export async function downloadAllMissing(
   onFileBytes?: (fileId: string, bytesWritten: number, totalBytes: number) => void,
 ): Promise<DownloadSummary> {
   await pushDeletions();
-  await syncUploads(handler);
   await refreshRemoteMetadata(handler);
+  await syncUploads(handler);
 
   const files = await metadataDb.listFiles();
   const missing = files.filter((file) => file.driveFileId && !localFileExists(file.localPath));
@@ -316,8 +325,8 @@ export async function downloadAllMissing(
 
 export async function syncNow(handler?: ProgressHandler): Promise<SyncSummary> {
   await pushDeletions();
-  const upload = await syncUploads(handler);
   const meta = await refreshRemoteMetadata(handler);
+  const upload = await syncUploads(handler);
   return {
     uploaded: upload.uploaded,
     pendingDownload: meta.pendingDownload,

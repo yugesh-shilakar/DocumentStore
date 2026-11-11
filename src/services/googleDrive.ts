@@ -10,6 +10,7 @@ import { DRIVE_FOLDER_NAME } from '../config';
 import type { RemoteFile } from '../types';
 import { AppError } from '../utils/errors';
 import { logger } from '../utils/logger';
+import { getActiveAccountKey } from './accountDb';
 import { forceRefreshAccessToken, getValidAccessToken } from './auth';
 import { getSetting, setSetting } from './metadataDb';
 
@@ -17,6 +18,7 @@ const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const FOLDER_SETTING_KEY = 'drive_folder_id';
+const verifiedFolders = new Set<string>();
 
 interface DriveListResponse {
   files?: DriveApiFile[];
@@ -167,6 +169,26 @@ async function driveJson<T>(url: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+function folderMemoKey(folderId: string): string {
+  return `${getActiveAccountKey()}|${folderId}`;
+}
+
+export async function getDriveFileMetadata(
+  fileId: string,
+): Promise<{ id: string; trashed: boolean } | null> {
+  try {
+    const result = await driveJson<{ id: string; trashed?: boolean }>(
+      `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=id,trashed`,
+    );
+    return { id: result.id, trashed: Boolean(result.trashed) };
+  } catch (error) {
+    if (error instanceof AppError && error.code === 'not_found') {
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function findFolderId(): Promise<string | null> {
   const params = queryString({
     q: `name = '${escapeQueryValue(DRIVE_FOLDER_NAME)}' and mimeType = '${FOLDER_MIME}' and trashed = false and 'root' in parents`,
@@ -194,16 +216,27 @@ async function createFolder(): Promise<string> {
 export async function ensureVaultFolder(): Promise<string> {
   const cached = await getSetting(FOLDER_SETTING_KEY);
   if (cached) {
-    return cached;
+    if (verifiedFolders.has(folderMemoKey(cached))) {
+      return cached;
+    }
+    const folder = await getDriveFileMetadata(cached);
+    if (folder && !folder.trashed) {
+      verifiedFolders.add(folderMemoKey(cached));
+      return cached;
+    }
+    logger.info('The Google Drive vault folder no longer exists; it will be recreated.');
+    await setSetting(FOLDER_SETTING_KEY, '');
   }
   const existing = await findFolderId();
   const folderId = existing ?? (await createFolder());
   await setSetting(FOLDER_SETTING_KEY, folderId);
+  verifiedFolders.add(folderMemoKey(folderId));
   logger.info('Google Drive vault folder ready.');
   return folderId;
 }
 
 export async function forgetVaultFolder(): Promise<void> {
+  verifiedFolders.clear();
   await setSetting(FOLDER_SETTING_KEY, '');
 }
 
@@ -343,20 +376,27 @@ export async function uploadVaultFile(
   const params = existingDriveFileId
     ? queryString({ fields: 'id' })
     : queryString({ addParents: folderId, removeParents: 'root', fields: 'id' });
-  await driveJson(`${DRIVE_API}/files/${uploaded.id}?${params}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: `${vaultId}__${name}`,
-      appProperties: {
-        vaultId,
-        originalName: name,
-        mimeType,
-        sha256,
-        appVersion: '0.1.0',
-      },
-    }),
-  });
+  try {
+    await driveJson(`${DRIVE_API}/files/${uploaded.id}?${params}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `${vaultId}__${name}`,
+        appProperties: {
+          vaultId,
+          originalName: name,
+          mimeType,
+          sha256,
+          appVersion: '0.1.0',
+        },
+      }),
+    });
+  } catch (error) {
+    if (!existingDriveFileId) {
+      await deleteDriveFile(uploaded.id).catch(() => undefined);
+    }
+    throw error;
+  }
 
   return {
     id: uploaded.id,
@@ -403,6 +443,7 @@ export async function deleteVaultFolder(): Promise<void> {
       throw error;
     }
   } finally {
+    verifiedFolders.clear();
     await setSetting(FOLDER_SETTING_KEY, '');
   }
 }

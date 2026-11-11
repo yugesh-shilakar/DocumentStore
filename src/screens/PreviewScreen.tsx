@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   StyleSheet,
@@ -99,7 +100,11 @@ export function PreviewScreen({ navigation, route }: Props) {
 
   const handleRename = async () => {
     setRenameOpen(false);
-    await renameFile(file.id, draftName);
+    const nextName = draftName.trim();
+    if (!nextName || nextName === file.name) {
+      return;
+    }
+    await renameFile(file.id, nextName);
   };
 
   return (
@@ -215,7 +220,7 @@ export function PreviewScreen({ navigation, route }: Props) {
         animationType="fade"
         onRequestClose={() => setRenameOpen(false)}
       >
-        <View style={styles.backdrop}>
+        <KeyboardAvoidingView behavior="padding" style={styles.backdrop}>
           <View style={styles.dialog}>
             <Text style={styles.dialogTitle}>Rename file</Text>
             <TextInput
@@ -236,7 +241,7 @@ export function PreviewScreen({ navigation, route }: Props) {
               </Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
